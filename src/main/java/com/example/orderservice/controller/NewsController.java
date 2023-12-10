@@ -2,6 +2,9 @@ package com.example.orderservice.controller;
 
 import com.example.orderservice.dto.NewsDto;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
@@ -12,8 +15,9 @@ import okhttp3.Response;
 import org.springframework.web.bind.annotation.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
-
+import org.jsoup.nodes.Document;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 
 @RestController
@@ -35,7 +39,7 @@ public class NewsController {
     }
 
     @GetMapping("/news")
-    public ResponseEntity<ArrayList<NewsDto>> getNews(){
+    public ResponseEntity<ArrayList<NewsDto>> getNews() throws Exception{
 
         ArrayList<NewsDto> newsDtos = new ArrayList<>();
 
@@ -86,8 +90,10 @@ public class NewsController {
             newsDto.setLink(item.getString("link"));
             newsDto.setDescription(item.getString("description"));
             newsDto.setPubDate(item.getString("pubDate"));
+            newsDto.setImg(linkPreview(newsDto.getOriginalling()));
 
             newsDtos.add(newsDto);
+
 //            // 각 객체의 필요한 데이터 추출
 //            String title = item.getString("title");
 //            String originallink = item.getString("originallink");
@@ -104,6 +110,91 @@ public class NewsController {
         }
         return ResponseEntity.status(HttpStatus.OK).body(newsDtos);
 
+    }
+    public static String getMetaTagContent(Document document, String metaTagName) {
+        Elements metaTags = document.select(metaTagName);
+        for (Element metaTag : metaTags) {
+            String content = metaTag.attr("content");
+            if (!content.isEmpty()) {
+                return content;
+            }
+        }
+        return "";
+    }
+
+    public static String getMetaTagSrc(Document document, String tagName) {
+        Elements elements = document.select(tagName);
+        for (Element element : elements) {
+            String src = element.attr("src");
+            if (!src.isEmpty()) {
+                return src;
+            }
+        }
+        return "";
+    }
+
+    public String linkPreview(String url) throws Exception {
+        if (!url.startsWith("http")) {
+            url = "http://" + url;
+        }
+
+        Document document = Jsoup.connect(url).get();
+
+        URI uri = new URI(url);
+        String domain = uri.getHost();
+
+        String link = url;
+        String description = "";
+        String thumbnail = "";
+        String favicon = "";
+
+        //System.out.println(document.toString());
+
+        if (!domain.startsWith("www")) {
+            domain = domain;
+        }
+
+        description = getMetaTagContent(document, "meta[name=description]");
+        if (description.equals("")) {
+            description = getMetaTagContent(document, "meta[property=og:description]");
+        }
+
+        thumbnail = getMetaTagContent(document, "meta[property=og:image]");
+        if (thumbnail.equals("")) {
+            thumbnail = getMetaTagContent(document, "meta[property=twitter:image]");
+            if (thumbnail.equals("")) {
+                thumbnail = getMetaTagSrc(document, "img");
+            }
+        }
+        if (!thumbnail.startsWith("http")) {
+            thumbnail = "http://" + domain + thumbnail;
+        }
+
+        Element faviconElem = document.head().select("link[href~=.*\\.(ico|png)]").first();
+        if (faviconElem != null) {
+            favicon = faviconElem.attr("href");
+        } else if (document.head().select("meta[itemprop=image]").first() != null) {
+            favicon = document.head().select("meta[itemprop=image]").first().attr("content");
+        }
+
+        if (!favicon.startsWith("http")) {
+            if (domain.startsWith("www")) {
+                favicon = "http://" + domain + favicon;
+            } else {
+                favicon = "http://www." + domain + favicon;
+            }
+        }
+
+        JSONObject result = new JSONObject();
+        result.put("domain", domain);
+        result.put("link", link);
+        result.put("description", description);
+        result.put("thumbnail", thumbnail);
+        result.put("favicon", favicon);
+
+        //System.out.println(result.get("thumbnail"));
+
+        return result.get("thumbnail").toString();
     }
 
 }
